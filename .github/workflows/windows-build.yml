@@ -1,0 +1,75 @@
+name: Windows build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone vcpkg
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/downloads
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/workflows/windows-build.yml') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          ./vcpkg/bootstrap-vcpkg.sh
+          ./vcpkg/vcpkg install pkgconf
+          ./vcpkg/vcpkg install zlib
+          ./vcpkg/vcpkg install libqrencode
+          ./vcpkg/vcpkg install zint
+          echo "TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.2.*'
+          install-deps: 'true'
+          archives: 'qtbase qtsvg qttools icu qttranslations qtwayland'
+
+      - name: Configure CMake
+        run: >
+          cmake -B build
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }}
+          -S ${{ github.workspace }}
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Smoke test
+        shell: pwsh
+        env:
+          QT_ASSUME_STDERR_HAS_CONSOLE: 1
+        run: |
+          ./build/glabels-batch/Release/glabels-batch-qt --Version
+
+      - name: Upload executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: glabels-qt-windows
+          path: |
+            build/**/Release/*.exe
+            build/**/Release/*.dll
