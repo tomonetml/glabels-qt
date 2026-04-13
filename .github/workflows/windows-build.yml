@@ -2,39 +2,55 @@ name: Windows build
 
 on:
   push:
-  pull_request:
+    branches:
+      - master
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE*'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build-windows:
     runs-on: windows-latest
 
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
+      VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v5
 
-      - name: Clone vcpkg
-        shell: bash
-        run: git clone --depth 1 https://github.com/microsoft/vcpkg.git
-
-      - name: Cache vcpkg
-        uses: actions/cache@v4
+      - name: Acquire vcpkg
+        uses: actions/checkout@v5
         with:
-          path: |
-            ${{ github.workspace }}/vcpkg/installed
-            ${{ github.workspace }}/vcpkg/downloads
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/workflows/windows-build.yml') }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-
+          repository: microsoft/vcpkg
+          path: vcpkg
 
-      - name: Install dependencies
+      - name: Bootstrap vcpkg
+        shell: bash
+        run: ./vcpkg/bootstrap-vcpkg.sh
+
+      - name: Enable GitHub Actions cache backend for vcpkg
+        uses: actions/github-script@v8
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '')
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '')
+
+      - name: Install vcpkg dependencies
         shell: bash
         run: |
-          ./vcpkg/bootstrap-vcpkg.sh
-          ./vcpkg/vcpkg install pkgconf
-          ./vcpkg/vcpkg install zlib
-          ./vcpkg/vcpkg install libqrencode
-          ./vcpkg/vcpkg install zint
+          ./vcpkg/vcpkg install pkgconf zlib libqrencode zint
           echo "TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $GITHUB_ENV
 
       - name: Install Qt
@@ -42,7 +58,8 @@ jobs:
         with:
           version: '6.2.*'
           install-deps: 'true'
-          archives: 'qtbase qtsvg qttools icu qttranslations qtwayland'
+          cache: 'true'
+          archives: 'qtbase qtsvg qttools icu qttranslations'
 
       - name: Configure CMake
         run: >
@@ -54,23 +71,24 @@ jobs:
           -S ${{ github.workspace }}
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
 
       - name: Deploy Qt runtime
         shell: pwsh
         run: |
           $windeployqt = (Get-Command windeployqt).Source
-          & $windeployqt --release --compiler-runtime "build\glabels\Release\glabels-qt.exe"
-          if (Test-Path "build\glabels-batch\Release\glabels-batch-qt.exe") {
-            & $windeployqt --release --compiler-runtime "build\glabels-batch\Release\glabels-batch-qt.exe"
+          & $windeployqt --release --compiler-runtime "$env:GITHUB_WORKSPACE\build\glabels\Release\glabels-qt.exe"
+          if (Test-Path "$env:GITHUB_WORKSPACE\build\glabels-batch\Release\glabels-batch-qt.exe") {
+            & $windeployqt --release --compiler-runtime "$env:GITHUB_WORKSPACE\build\glabels-batch\Release\glabels-batch-qt.exe"
           }
 
       - name: Smoke test
         shell: pwsh
+        working-directory: ${{ github.workspace }}\build
         env:
-          QT_DEBUG_PLUGINS: 1
+          QT_ASSUME_STDERR_HAS_CONSOLE: 1
         run: |
-          ./build/glabels-batch/Release/glabels-batch-qt.exe --Version
+          .\glabels-batch\Release\glabels-batch-qt.exe --Version
 
       - name: Upload packaged app
         uses: actions/upload-artifact@v4
