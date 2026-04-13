@@ -12,13 +12,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Clone vcpkg
         shell: bash
-        run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git
+        run: git clone --depth 1 https://github.com/microsoft/vcpkg.git
 
       - name: Cache vcpkg
         uses: actions/cache@v4
@@ -59,17 +56,28 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Deploy Qt runtime
+        shell: pwsh
+        run: |
+          $windeployqt = (Get-Command windeployqt).Source
+          & $windeployqt --release --compiler-runtime "build\glabels\Release\glabels-qt.exe"
+          if (Test-Path "build\glabels-batch\Release\glabels-batch-qt.exe") {
+            & $windeployqt --release --compiler-runtime "build\glabels-batch\Release\glabels-batch-qt.exe"
+          }
+
       - name: Smoke test
         shell: pwsh
         env:
-          QT_ASSUME_STDERR_HAS_CONSOLE: 1
+          QT_DEBUG_PLUGINS: 1
         run: |
-          ./build/glabels-batch/Release/glabels-batch-qt --Version
+          ./build/glabels-batch/Release/glabels-batch-qt.exe --Version
 
-      - name: Upload executables
+      - name: Upload packaged app
         uses: actions/upload-artifact@v4
         with:
           name: glabels-qt-windows
           path: |
-            build/**/Release/*.exe
-            build/**/Release/*.dll
+            build/glabels/Release/**
+            build/glabels-batch/Release/**
+            build/model/**
+            build/translations/**
