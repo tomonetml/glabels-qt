@@ -2,21 +2,7 @@ name: Windows build
 
 on:
   push:
-    branches:
-      - master
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE*'
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  contents: read
 
 jobs:
   build-windows:
@@ -68,34 +54,17 @@ jobs:
           -DCMAKE_CXX_COMPILER=cl
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }}
+          -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}\stage
           -S ${{ github.workspace }}
 
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Deploy Qt runtime
-        shell: pwsh
-        run: |
-          $windeployqt = (Get-Command windeployqt).Source
-          & $windeployqt --release --compiler-runtime "$env:GITHUB_WORKSPACE\build\glabels\Release\glabels-qt.exe"
-          if (Test-Path "$env:GITHUB_WORKSPACE\build\glabels-batch\Release\glabels-batch-qt.exe") {
-            & $windeployqt --release --compiler-runtime "$env:GITHUB_WORKSPACE\build\glabels-batch\Release\glabels-batch-qt.exe"
-          }
+      - name: Install
+        run: cmake --install build --config Release --prefix "${{ github.workspace }}\stage"
 
-      - name: Smoke test
-        shell: pwsh
-        working-directory: ${{ github.workspace }}\build
-        env:
-          QT_ASSUME_STDERR_HAS_CONSOLE: 1
-        run: |
-          .\glabels-batch\Release\glabels-batch-qt.exe --Version
-
-      - name: Upload packaged app
+      - name: Upload installed app
         uses: actions/upload-artifact@v4
         with:
           name: glabels-qt-windows
-          path: |
-            build/glabels/Release/**
-            build/glabels-batch/Release/**
-            build/model/**
-            build/translations/**
+          path: stage/**
